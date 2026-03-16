@@ -22,6 +22,7 @@ It wrote the code, ran away, and now the game is unplayable.
 4. **Refactor & Test.** - Move the logic into `logic_utils.py`.
    - Run `pytest` in your terminal.
    - Keep fixing until all tests pass!
+5. **Toggle Hints.** Add a sidebar checkbox so players can turn the higher/lower hints on or off. The game should still track outcomes and score even when hints are hidden.
 
 ## 📝 Document Your Experience
 
