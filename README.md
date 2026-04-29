@@ -35,8 +35,27 @@ I removed the string conversion logic to ensure numerical comparison, eliminated
 
 ## 📸 Demo
 
-- [Screenshot of the fixed game running in Streamlit, showing accurate hints and visible score]
-- [Screenshot of pytest results showing all 5 tests passing]
+> **Note:** Add a screenshot of the fixed game running in Streamlit here (showing accurate hints and visible score).
+
+### pytest Results
+
+All 5 tests passing:
+
+```
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-8.3.5, pluggy-1.5.0
+rootdir: ai110-module1show-gameglitchinvestigator-starter
+plugins: Faker-38.2.0
+collecting ... collected 5 items
+
+tests/test_game_logic.py::test_winning_guess PASSED                      [ 20%]
+tests/test_game_logic.py::test_guess_too_high PASSED                     [ 40%]
+tests/test_game_logic.py::test_guess_too_low PASSED                      [ 60%]
+tests/test_game_logic.py::test_hint_toggle_off PASSED                    [ 80%]
+tests/test_game_logic.py::test_check_guess_with_string_secret PASSED     [100%]
+
+============================== 5 passed in 0.19s ==============================
+```
 
 ## 🚀 Stretch Features
 
