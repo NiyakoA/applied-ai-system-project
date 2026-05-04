@@ -1,143 +1,267 @@
-import random
+"""
+AI Code Debugger — Streamlit UI
+
+An agentic AI that autonomously plans, acts, and verifies fixes
+for buggy Python code using Gemini's function-calling loop.
+"""
+
+import os
+
 import streamlit as st
-from logic_utils import (
-    get_range_for_difficulty,
-    parse_guess,
-    check_guess,
-    check_guess_with_hints,
-    update_score,
-)
+from dotenv import load_dotenv
 
-st.set_page_config(page_title="Glitchy Guesser", page_icon="🎮")
+from agent import run_debugging_agent
+from logger_config import setup_logging
 
-st.title("🎮 Game Glitch Investigator")
-st.caption("An AI-generated guessing game. Something is off.")
+load_dotenv()
+setup_logging()
 
-st.sidebar.header("Settings")
+# ---------------------------------------------------------------------------
+# Example buggy programs
+# ---------------------------------------------------------------------------
+EXAMPLES: dict[str, str] = {
+    "ZeroDivisionError": """\
+def calculate_average(numbers):
+    total = sum(numbers)
+    count = len(numbers)
+    return total / count  # Bug: crashes on an empty list
 
-difficulty = st.sidebar.selectbox(
-    "Difficulty",
-    ["Easy", "Normal", "Hard"],
-    index=1,
-)
+result = calculate_average([])
+print(f"Average: {result}")
+""",
+    "NameError": """\
+def greet_user(name):
+    message = f"Hello, {username}!"  # Bug: 'username' is undefined; should be 'name'
+    return message
 
-attempt_limit_map = {
-    "Easy": 6,
-    "Normal": 8,
-    "Hard": 5,
+print(greet_user("Alice"))
+""",
+    "Logic Error (off-by-one)": """\
+def fibonacci(n):
+    if n <= 0:
+        return []
+    elif n == 1:
+        return [0]
+
+    fib = [0, 1]
+    for i in range(2, n):
+        fib.append(fib[i - 1] + fib[i - 2])
+
+    return fib[:n - 1]  # Bug: slices one element too few
+
+# Expected: [0, 1, 1, 2, 3]
+print(fibonacci(5))
+""",
+    "TypeError": """\
+def multiply_items(items, factor):
+    return [item * factor for item in items]
+
+numbers = "123"          # Bug: should be [1, 2, 3], not a string
+result = multiply_items(numbers, 2)
+print(result)
+""",
+    "IndexError": """\
+def get_second_largest(numbers):
+    sorted_nums = sorted(numbers)
+    return sorted_nums[-2]  # Bug: crashes when the list has fewer than 2 elements
+
+print(get_second_largest([42]))
+""",
 }
-attempt_limit = attempt_limit_map[difficulty]
 
-low, high = get_range_for_difficulty(difficulty)
-
-# sidebar settings
-st.sidebar.caption(f"Range: {low} to {high}")
-st.sidebar.caption(f"Attempts allowed: {attempt_limit}")
-
-# hint toggle (stored in session state so it survives reruns)
-if "show_hints" not in st.session_state:
-    st.session_state.show_hints = True
-show_hints = True  # Always show hints to make game playable - FIX: Removed checkbox to ensure hints are always on, as AI identified that disabling hints made the game unplayable
-st.session_state.show_hints = show_hints
-
-if "secret" not in st.session_state:
-    st.session_state.secret = random.randint(low, high)
-
-if "attempts" not in st.session_state:
-    st.session_state.attempts = 1
-
-if "score" not in st.session_state:
-    st.session_state.score = 0
-
-if "status" not in st.session_state:
-    st.session_state.status = "playing"
-
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-st.subheader("Make a guess")
-
-st.info(
-    f"Guess a number between {low} and {high}. "
-    f"Attempts left: {attempt_limit - st.session_state.attempts}"
+# ---------------------------------------------------------------------------
+# Page config
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="AI Code Debugger Agent",
+    page_icon="🐛",
+    layout="wide",
 )
 
-st.write(f"Current Score: {st.session_state.score}")  # FIX: Added visible score display to fix disappearing scores - AI suggested adding this line after reviewing the UI
-
-with st.expander("Developer Debug Info"):
-    st.write("Secret:", st.session_state.secret)
-    st.write("Attempts:", st.session_state.attempts)
-    st.write("Score:", st.session_state.score)
-    st.write("Difficulty:", difficulty)
-    st.write("History:", st.session_state.history)
-
-raw_guess = st.text_input(
-    "Enter your guess:",
-    key=f"guess_input_{difficulty}"
+st.title("🐛 AI Code Debugger Agent")
+st.caption(
+    "An agentic AI that **plans → acts → verifies** fixes for buggy Python code. "
+    "Powered by Groq (Llama 3.3) with tool calling."
 )
 
-col1, col2 = st.columns(2)
-with col1:
-    submit = st.button("Submit Guess 🚀")
-with col2:
-    new_game = st.button("New Game 🔁")
-
-if new_game:
-    st.session_state.attempts = 0
-    st.session_state.secret = random.randint(low, high)
-    st.success("New game started.")
-    st.rerun()
-
-if st.session_state.status != "playing":
-    if st.session_state.status == "won":
-        st.success("You already won. Start a new game to play again.")
-    else:
-        st.error("Game over. Start a new game to try again.")
+# ---------------------------------------------------------------------------
+# API key guard
+# ---------------------------------------------------------------------------
+api_key = os.getenv("GROQ_API_KEY")
+if not api_key:
+    st.error("**GROQ_API_KEY not set.** Create a `.env` file with:")
+    st.code("GROQ_API_KEY=gsk_...")
     st.stop()
 
-if submit:
-    st.session_state.attempts += 1
+# ---------------------------------------------------------------------------
+# Layout
+# ---------------------------------------------------------------------------
+left, right = st.columns([1, 1], gap="large")
 
-    ok, guess_int, err = parse_guess(raw_guess)
+with left:
+    st.subheader("Input")
 
-    if not ok:
-        st.session_state.history.append(raw_guess)
-        st.error(err)
-    else:
-        st.session_state.history.append(guess_int)
+    example_choice = st.selectbox(
+        "Load a built-in example:",
+        ["— choose one —"] + list(EXAMPLES.keys()),
+    )
 
-        secret = st.session_state.secret  # FIX: Removed string conversion on even attempts to fix inaccurate hints - AI suggested removing the if-else logic after analyzing the TypeError handling
+    default_code = (
+        EXAMPLES.get(example_choice, "")
+        if example_choice != "— choose one —"
+        else ""
+    )
 
-        # use helper that can suppress the hint text
-        outcome, message = check_guess_with_hints(
-            guess_int, secret, show_hints=st.session_state.show_hints
-        )
+    buggy_code = st.text_area(
+        "Buggy Python Code",
+        value=default_code,
+        height=260,
+        placeholder="Paste your broken Python code here…",
+    )
 
-        # warning will be empty when hints are disabled
-        if message:
-            st.warning(message)
+    error_message = st.text_area(
+        "Error / Traceback (optional)",
+        height=110,
+        placeholder="Paste the error or traceback you observe when running the code…",
+    )
 
-        st.session_state.score = update_score(
-            current_score=st.session_state.score,
-            outcome=outcome,
-            attempt_number=st.session_state.attempts,
-        )
+    run_btn = st.button(
+        "Debug Code",
+        type="primary",
+        disabled=not buggy_code.strip(),
+        use_container_width=True,
+    )
 
-        if outcome == "Win":
-            st.balloons()
-            st.session_state.status = "won"
-            st.success(
-                f"You won! The secret was {st.session_state.secret}. "
-                f"Final score: {st.session_state.score}"
-            )
-        else:
-            if st.session_state.attempts >= attempt_limit:
-                st.session_state.status = "lost"
-                st.error(
-                    f"Out of attempts! "
-                    f"The secret was {st.session_state.secret}. "
-                    f"Score: {st.session_state.score}"
+    st.divider()
+    st.markdown(
+        "**How it works**\n\n"
+        "1. Gemini checks syntax and reproduces the error with tools\n"
+        "2. Gemini diagnoses the root cause\n"
+        "3. Groq applies a fix and verifies it runs successfully\n"
+        "4. The corrected code and explanation are shown on the right"
+    )
+
+# ---------------------------------------------------------------------------
+# Run the agent
+# ---------------------------------------------------------------------------
+with right:
+    st.subheader("Results")
+
+    if run_btn and buggy_code.strip():
+        status = st.status("Agent is working…", expanded=True)
+
+        try:
+            with status:
+                result = run_debugging_agent(
+                    buggy_code=buggy_code,
+                    error_message=error_message or None,
                 )
+        except Exception as exc:
+            st.error(f"Error: {exc}")
+            st.stop()
 
-st.divider()
-st.caption("Built by an AI that claims this code is production-ready.")
+        if result["success"]:
+            status.update(
+                label=f"Bug fixed in {result['iterations']} iteration(s)!",
+                state="complete",
+            )
+            st.success("Fix verified — the corrected code runs without errors.")
+        else:
+            status.update(
+                label=(
+                    f"Could not find a verified fix "
+                    f"({result['iterations']} iteration(s) used)."
+                ),
+                state="error",
+            )
+            st.warning(
+                "The agent could not produce a verified fix. "
+                "See the steps below for what it tried."
+            )
+
+        # Confidence score
+        conf = result.get("confidence")
+        if conf is not None:
+            if conf >= 0.85:
+                label = f"Agent confidence: {conf:.0%} — high"
+                color = "green"
+            elif conf >= 0.60:
+                label = f"Agent confidence: {conf:.0%} — moderate"
+                color = "orange"
+            else:
+                label = f"Agent confidence: {conf:.0%} — low (review carefully)"
+                color = "red"
+            st.markdown(
+                f'<p style="color:{color}; font-weight:600">{label}</p>',
+                unsafe_allow_html=True,
+            )
+
+        # Explanation
+        if result["explanation"]:
+            st.markdown("### Explanation")
+            st.markdown(result["explanation"])
+
+        # Fixed code
+        if result["fixed_code"]:
+            st.markdown("### Fixed Code")
+            st.code(result["fixed_code"], language="python")
+
+        # Step-by-step breakdown
+        st.markdown("### Agent Steps")
+
+        by_iteration: dict[int, list[dict]] = {}
+        for step in result["steps"]:
+            it = step.get("iteration", 0)
+            by_iteration.setdefault(it, []).append(step)
+
+        for it, steps in sorted(by_iteration.items()):
+            with st.expander(f"Iteration {it}", expanded=(it == 1)):
+                for step in steps:
+                    stype = step["type"]
+
+                    if stype == "analysis":
+                        st.markdown(step["content"])
+
+                    elif stype == "tool_call":
+                        tool = step["tool"]
+                        res = step["result"]
+                        ok = res.get("success", res.get("valid", False))
+                        icon = "✅" if ok else "❌"
+
+                        if tool == "check_syntax":
+                            msg = (
+                                "No syntax errors"
+                                if ok
+                                else f"Syntax error: {res.get('error', '')}"
+                            )
+                            st.write(f"{icon} **check_syntax** — {msg}")
+
+                        elif tool == "run_code":
+                            label = step["input"].get("label", "run")
+                            st.write(f"{icon} **run_code** ({label})")
+                            if res.get("stdout"):
+                                st.code(res["stdout"][:500], language="text")
+                            if res.get("stderr"):
+                                st.code(res["stderr"][:500], language="text")
+                            if res.get("error"):
+                                st.code(res["error"], language="text")
+
+                        elif tool == "apply_fix":
+                            verification = res.get("verification", "unknown")
+                            conf_val = res.get("confidence")
+                            conf_str = f" | confidence: {conf_val:.0%}" if conf_val is not None else ""
+                            st.write(
+                                f"{icon} **apply_fix** — verification: {verification}{conf_str}"
+                            )
+                            if res.get("stderr"):
+                                st.code(res["stderr"][:400], language="text")
+                            if res.get("error"):
+                                st.code(res["error"], language="text")
+
+                    elif stype == "error":
+                        st.error(step["content"])
+    else:
+        st.info(
+            "Choose an example or paste your own code on the left, "
+            "then click **Debug Code** to start."
+        )

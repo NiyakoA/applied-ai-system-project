@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_tools.py -v)",
+      "Bash(awk '{print $2}')",
+      "Bash(python3 -)"
+    ]
+  }
+}
